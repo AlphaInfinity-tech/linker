@@ -1,0 +1,2 @@
+# Standard Python library used (sqlite3, urllib, json, http.server)
+# No external package dependencies required

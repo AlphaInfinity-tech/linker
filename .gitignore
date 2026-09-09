@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Local Database & logs
+geotrace.db
+geotrace.db-wal
+geotrace.db-shm
+*.log
+
+# Vercel
+.vercel
