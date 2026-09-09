@@ -10,9 +10,19 @@ import math
 import csv
 import io
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HTML_PATH = os.path.join(BASE_DIR, 'public', 'index.html') if os.path.exists(os.path.join(BASE_DIR, 'public', 'index.html')) else os.path.join(BASE_DIR, 'em.html')
-ADMIN_PATH = os.path.join(BASE_DIR, 'public', 'admin.html') if os.path.exists(os.path.join(BASE_DIR, 'public', 'admin.html')) else os.path.join(BASE_DIR, 'admin.html')
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(CURRENT_DIR)
+
+def find_file(filenames):
+    for fn in filenames:
+        for root in [BASE_DIR, os.path.join(BASE_DIR, 'public'), CURRENT_DIR]:
+            p = os.path.join(root, fn)
+            if os.path.exists(p):
+                return p
+    return None
+
+HTML_PATH = find_file(['index.html', 'em.html']) or os.path.join(BASE_DIR, 'public', 'index.html')
+ADMIN_PATH = find_file(['admin.html']) or os.path.join(BASE_DIR, 'public', 'admin.html')
 
 # In Vercel / serverless lambda environment, /tmp is the writable storage directory
 if os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME') or not os.access(BASE_DIR, os.W_OK):
@@ -143,23 +153,28 @@ class handler(BaseHTTPRequestHandler):
             raw_path = parsed_url.path
             query_params = urllib.parse.parse_qs(parsed_url.query)
 
-            # Strip '/api' prefix to normalize both /api/sessions and /sessions
+            # Clean path
             norm_path = raw_path
             if norm_path.startswith('/api/'):
                 norm_path = '/' + norm_path[5:]
+            while norm_path.startswith('/public/'):
+                norm_path = '/' + norm_path[8:]
 
-            # Serve HTML views
-            if raw_path in ('/', '/index.html') or norm_path in ('/', '/index.html'):
-                if os.path.exists(HTML_PATH):
-                    with open(HTML_PATH, 'rb') as f:
+            # Serve Admin HTML
+            if 'admin' in raw_path or 'admin' in norm_path:
+                target_admin = ADMIN_PATH if (ADMIN_PATH and os.path.exists(ADMIN_PATH)) else find_file(['admin.html'])
+                if target_admin and os.path.exists(target_admin):
+                    with open(target_admin, 'rb') as f:
                         html = f.read()
                     self._send_response(200, content_type='text/html; charset=utf-8')
                     self.wfile.write(html)
                     return
 
-            if raw_path in ('/admin', '/admin.html') or norm_path in ('/admin', '/admin.html'):
-                if os.path.exists(ADMIN_PATH):
-                    with open(ADMIN_PATH, 'rb') as f:
+            # Serve Client HTML
+            if raw_path in ('/', '/index.html') or norm_path in ('/', '/index.html'):
+                target_client = HTML_PATH if (HTML_PATH and os.path.exists(HTML_PATH)) else find_file(['index.html', 'em.html'])
+                if target_client and os.path.exists(target_client):
+                    with open(target_client, 'rb') as f:
                         html = f.read()
                     self._send_response(200, content_type='text/html; charset=utf-8')
                     self.wfile.write(html)
@@ -408,6 +423,8 @@ class handler(BaseHTTPRequestHandler):
             norm_path = raw_path
             if norm_path.startswith('/api/'):
                 norm_path = '/' + norm_path[5:]
+            while norm_path.startswith('/public/'):
+                norm_path = '/' + norm_path[8:]
 
             # Create Campaign
             if raw_path == '/api/campaigns' or norm_path == '/campaigns':
@@ -586,6 +603,8 @@ class handler(BaseHTTPRequestHandler):
             norm_path = raw_path
             if norm_path.startswith('/api/'):
                 norm_path = '/' + norm_path[5:]
+            while norm_path.startswith('/public/'):
+                norm_path = '/' + norm_path[8:]
 
             if raw_path.startswith('/api/sessions/') or norm_path.startswith('/sessions/'):
                 token = raw_path.split('/api/sessions/')[1] if '/api/sessions/' in raw_path else norm_path.split('/sessions/')[1]
