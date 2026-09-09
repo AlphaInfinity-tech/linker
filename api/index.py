@@ -15,7 +15,7 @@ HTML_PATH = os.path.join(BASE_DIR, 'public', 'index.html') if os.path.exists(os.
 ADMIN_PATH = os.path.join(BASE_DIR, 'public', 'admin.html') if os.path.exists(os.path.join(BASE_DIR, 'public', 'admin.html')) else os.path.join(BASE_DIR, 'admin.html')
 
 # In Vercel / serverless lambda environment, /tmp is the writable storage directory
-if os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
+if os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME') or not os.access(BASE_DIR, os.W_OK):
     DB_PATH = '/tmp/geotrace.db'
 else:
     DB_PATH = os.path.join(BASE_DIR, 'geotrace.db')
@@ -108,7 +108,7 @@ def init_db():
         conn.commit()
         conn.close()
 
-# Auto-initialize database schema on lambda boot
+# Auto-initialize database schema
 init_db()
 
 def haversine_distance(lat1, lon1, lat2, lon2):
@@ -138,12 +138,18 @@ class handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
+            init_db()
             parsed_url = urllib.parse.urlparse(self.path)
-            path = parsed_url.path
+            raw_path = parsed_url.path
             query_params = urllib.parse.parse_qs(parsed_url.query)
 
-            # Serve HTML views if requested directly via function
-            if path in ('/', '/index.html'):
+            # Strip '/api' prefix to normalize both /api/sessions and /sessions
+            norm_path = raw_path
+            if norm_path.startswith('/api/'):
+                norm_path = '/' + norm_path[5:]
+
+            # Serve HTML views
+            if raw_path in ('/', '/index.html') or norm_path in ('/', '/index.html'):
                 if os.path.exists(HTML_PATH):
                     with open(HTML_PATH, 'rb') as f:
                         html = f.read()
@@ -151,7 +157,7 @@ class handler(BaseHTTPRequestHandler):
                     self.wfile.write(html)
                     return
 
-            if path in ('/admin', '/admin.html'):
+            if raw_path in ('/admin', '/admin.html') or norm_path in ('/admin', '/admin.html'):
                 if os.path.exists(ADMIN_PATH):
                     with open(ADMIN_PATH, 'rb') as f:
                         html = f.read()
@@ -159,8 +165,8 @@ class handler(BaseHTTPRequestHandler):
                     self.wfile.write(html)
                     return
 
-            # API: Stats
-            if path == '/api/stats':
+            # API: Stats (/api/stats or /stats)
+            if raw_path == '/api/stats' or norm_path == '/stats':
                 with db_lock:
                     conn = get_db_connection()
                     c = conn.cursor()
@@ -179,8 +185,8 @@ class handler(BaseHTTPRequestHandler):
                 }).encode('utf-8'))
                 return
 
-            # API: Campaigns
-            if path == '/api/campaigns':
+            # API: Campaigns (/api/campaigns or /campaigns)
+            if raw_path == '/api/campaigns' or norm_path == '/campaigns':
                 with db_lock:
                     conn = get_db_connection()
                     c = conn.cursor()
@@ -191,8 +197,8 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(rows).encode('utf-8'))
                 return
 
-            # API: Sessions List
-            if path == '/api/sessions':
+            # API: Sessions List (/api/sessions or /sessions)
+            if raw_path == '/api/sessions' or norm_path == '/sessions':
                 with db_lock:
                     conn = get_db_connection()
                     c = conn.cursor()
@@ -226,9 +232,9 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(sessions).encode('utf-8'))
                 return
 
-            # API: Single Session details
-            if path.startswith('/api/sessions/'):
-                token = path.split('/api/sessions/')[1]
+            # API: Single Session details (/api/sessions/<token> or /sessions/<token>)
+            if raw_path.startswith('/api/sessions/') or norm_path.startswith('/sessions/'):
+                token = raw_path.split('/api/sessions/')[1] if '/api/sessions/' in raw_path else norm_path.split('/sessions/')[1]
                 with db_lock:
                     conn = get_db_connection()
                     c = conn.cursor()
@@ -260,8 +266,8 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(sess_data).encode('utf-8'))
                 return
 
-            # API: Locations
-            if path == '/api/locations':
+            # API: Locations (/api/locations or /locations)
+            if raw_path == '/api/locations' or norm_path == '/locations':
                 limit = int(query_params.get('limit', [1000])[0])
                 token = query_params.get('token', [None])[0]
                 with db_lock:
@@ -277,8 +283,8 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(rows).encode('utf-8'))
                 return
 
-            # API: Export
-            if path == '/api/export':
+            # API: Export (/api/export or /export)
+            if raw_path == '/api/export' or norm_path == '/export':
                 fmt = query_params.get('format', ['json'])[0].lower()
                 token = query_params.get('session', [None])[0]
                 
@@ -385,7 +391,7 @@ class handler(BaseHTTPRequestHandler):
                 return
 
             self._send_response(404)
-            self.wfile.write(json.dumps({'error': 'Endpoint not found'}).encode('utf-8'))
+            self.wfile.write(json.dumps({'error': 'Endpoint not found', 'path': raw_path}).encode('utf-8'))
 
         except Exception as e:
             self._send_response(500)
@@ -393,13 +399,18 @@ class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            init_db()
             content_length = int(self.headers.get('Content-Length', 0))
             post_data = self.rfile.read(content_length).decode('utf-8')
-            path = urllib.parse.urlparse(self.path).path
+            raw_path = urllib.parse.urlparse(self.path).path
             data = json.loads(post_data or '{}')
 
+            norm_path = raw_path
+            if norm_path.startswith('/api/'):
+                norm_path = '/' + norm_path[5:]
+
             # Create Campaign
-            if path == '/api/campaigns':
+            if raw_path == '/api/campaigns' or norm_path == '/campaigns':
                 code = (data.get('code') or '').strip().lower()
                 name = (data.get('name') or '').strip()
                 template = data.get('template') or 'default'
@@ -431,8 +442,8 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'status': 'created', 'id': new_id, 'code': code}).encode('utf-8'))
                 return
 
-            # Register Consent & Fingerprint
-            if path in ('/consent', '/api/consent'):
+            # Register Consent & Fingerprint (/consent or /api/consent)
+            if raw_path in ('/consent', '/api/consent') or norm_path in ('/consent', '/api/consent'):
                 consent = bool(data.get('consent', True))
                 if not consent:
                     self._send_response(400)
@@ -499,8 +510,8 @@ class handler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({'status': 'consent_recorded', 'token': token}).encode('utf-8'))
                 return
 
-            # Submit Location Fix
-            if path in ('/submit-location', '/api/submit-location'):
+            # Submit Location Fix (/submit-location or /api/submit-location)
+            if raw_path in ('/submit-location', '/api/submit-location') or norm_path in ('/submit-location', '/api/submit-location'):
                 token = data.get('token')
                 if not token:
                     self._send_response(400)
@@ -562,7 +573,7 @@ class handler(BaseHTTPRequestHandler):
                 return
 
             self._send_response(404)
-            self.wfile.write(json.dumps({'error': 'Not found'}).encode('utf-8'))
+            self.wfile.write(json.dumps({'error': 'Not found', 'path': raw_path}).encode('utf-8'))
 
         except Exception as e:
             self._send_response(500)
@@ -570,9 +581,14 @@ class handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         try:
-            path = urllib.parse.urlparse(self.path).path
-            if path.startswith('/api/sessions/'):
-                token = path.split('/api/sessions/')[1]
+            init_db()
+            raw_path = urllib.parse.urlparse(self.path).path
+            norm_path = raw_path
+            if norm_path.startswith('/api/'):
+                norm_path = '/' + norm_path[5:]
+
+            if raw_path.startswith('/api/sessions/') or norm_path.startswith('/sessions/'):
+                token = raw_path.split('/api/sessions/')[1] if '/api/sessions/' in raw_path else norm_path.split('/sessions/')[1]
                 with db_lock:
                     conn = get_db_connection()
                     c = conn.cursor()

@@ -1,9 +1,10 @@
 {
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index.py" },
-    { "source": "/consent", "destination": "/api/index.py" },
-    { "source": "/submit-location", "destination": "/api/index.py" },
-    { "source": "/admin", "destination": "/admin.html" },
-    { "source": "/", "destination": "/index.html" }
+    { "source": "/admin", "destination": "/public/admin.html" },
+    { "source": "/consent", "destination": "/api/consent.py" },
+    { "source": "/submit-location", "destination": "/api/submit_location.py" },
+    { "source": "/api/sessions/(.*)", "destination": "/api/sessions.py" },
+    { "source": "/api/(.*)", "destination": "/api/$1.py" },
+    { "source": "/(.*)", "destination": "/public/$1" }
   ]
 }

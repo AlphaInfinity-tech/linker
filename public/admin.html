@@ -498,10 +498,13 @@ function getSessionColor(idx){
 async function loadSummaryStats(){
   try {
     const res = await fetch('/api/stats');
+    if(!res.ok) return;
     const data = await res.json();
-    document.getElementById('statSessions').textContent = data.total_sessions;
-    document.getElementById('statFixes').textContent = data.total_locations;
-    document.getElementById('statCampaigns').textContent = data.total_campaigns;
+    if(data.total_sessions !== undefined){
+      document.getElementById('statSessions').textContent = data.total_sessions;
+      document.getElementById('statFixes').textContent = data.total_locations;
+      document.getElementById('statCampaigns').textContent = data.total_campaigns;
+    }
   } catch(e){
     console.error('Stats fetch error:', e);
   }
@@ -510,7 +513,10 @@ async function loadSummaryStats(){
 async function loadSessions(){
   try {
     const res = await fetch('/api/sessions');
-    allSessions = await res.json();
+    if(!res.ok) return;
+    const data = await res.json();
+    if(!Array.isArray(data)) return;
+    allSessions = data;
     renderSessionList(allSessions);
     renderAllMapTraces(allSessions);
     document.getElementById('sessionCountBadge').textContent = `${allSessions.length} SESSIONS`;
@@ -520,6 +526,7 @@ async function loadSessions(){
 }
 
 function renderSessionList(sessions){
+  if(!Array.isArray(sessions)) return;
   const listEl = document.getElementById('sessionList');
   const search = (document.getElementById('sessionSearch').value || '').toLowerCase();
   
